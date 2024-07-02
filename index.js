@@ -1,6 +1,7 @@
 const express = require("express");
 const app = express();
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
 const port = process.env.PORT || 5001;
@@ -30,9 +31,30 @@ async function run() {
     const reviewCollection = client.db("restaurantDB").collection("reviews");
     const cartCollection = client.db("restaurantDB").collection("carts");
 
+    //iwt related api
+
+    //Create token
+    app.post("/jwt", async (req, res) => {
+      const user = req.body;
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
+        expiresIn: "1h",
+      });
+      res.send({ token });
+    });
+    // middlewares for verify token
+    const verifyToken = (req, res, next) => {
+      console.log("inside verify token", req.headers);
+      if (!req.headers.authorization) {
+        return res.status(401).send({ message: "forbidden access" });
+      }
+      const token = req.headers.authorization.split(" ")[1];
+
+      // next();
+    };
+
     // Users related api
     // get users data
-    app.get("/users", async (req, res) => {
+    app.get("/users", verifyToken, async (req, res) => {
       try {
         const result = await userCollection.find().toArray();
         res.send(result);
@@ -47,7 +69,7 @@ async function run() {
         // insert email if user doesn't exists:
         // you can do this many ways (1. email unique, 2. upsert 3.simple checking)
         const query = { email: user.email };
-        const existingUser = await userCollection.findOne();
+        const existingUser = await userCollection.findOne(query);
         if (existingUser) {
           return res.send({ message: "user already exists", insertedId: null });
         }
