@@ -31,7 +31,7 @@ async function run() {
     const reviewCollection = client.db("restaurantDB").collection("reviews");
     const cartCollection = client.db("restaurantDB").collection("carts");
 
-    //iwt related api
+    //jwt related api
 
     //Create token
     app.post("/jwt", async (req, res) => {
@@ -41,20 +41,45 @@ async function run() {
       });
       res.send({ token });
     });
+
     // middlewares for verify token
     const verifyToken = (req, res, next) => {
-      console.log("inside verify token", req.headers);
+      console.log("inside verify token", req.headers.authorization);
       if (!req.headers.authorization) {
-        return res.status(401).send({ message: "forbidden access" });
+        return res.status(401).send({ message: "unauthorized access" });
       }
+
       const token = req.headers.authorization.split(" ")[1];
 
-      // next();
+      jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+        if (err) {
+          return res.status(401).send({ message: "unauthorized access" });
+        }
+        req.decoded = decoded;
+        next();
+      });
+    };
+
+    // use verify admin after verifyToken
+    const verifyAdmin = async (req, res, next) => {
+      try {
+        const email = req.decoded.email;
+        const query = { email: email };
+        const user = await userCollection.findOne(query);
+        const isAdmin = user?.role === "admin";
+        if (!isAdmin) {
+          return res.status(403).send({ message: "forbidden access" });
+        }
+      } catch (error) {
+        console.log(error.message);
+      }
+      next();
     };
 
     // Users related api
+
     // get users data
-    app.get("/users", verifyToken, async (req, res) => {
+    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
       try {
         const result = await userCollection.find().toArray();
         res.send(result);
@@ -62,6 +87,27 @@ async function run() {
         console.log(error.message);
       }
     });
+
+    // get user data for admin
+    app.get("/users/admin/:email", verifyToken, async (req, res) => {
+      try {
+        const email = req.params.email;
+        if (email !== req.decoded.email) {
+          return res.status(403).send({ massage: "forbidden access" });
+        }
+
+        const query = { email: email };
+        const user = await userCollection.findOne(query);
+        let admin = false;
+        if (user) {
+          admin = user?.role === "admin";
+        }
+        res.send({ admin });
+      } catch (error) {
+        console.log(error.message);
+      }
+    });
+
     // save users data
     app.post("/users", async (req, res) => {
       try {
@@ -81,24 +127,29 @@ async function run() {
       }
     });
     // for admin user / updated
-    app.patch("/users/admin/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const filter = { _id: new ObjectId(id) };
-        const updatedDoc = {
-          $set: {
-            role: "admin",
-          },
-        };
-        const result = await userCollection.updateOne(filter, updatedDoc);
-        res.send(result);
-      } catch (error) {
-        console.log(error.message);
+    app.patch(
+      "/users/admin/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const id = req.params.id;
+          const filter = { _id: new ObjectId(id) };
+          const updatedDoc = {
+            $set: {
+              role: "admin",
+            },
+          };
+          const result = await userCollection.updateOne(filter, updatedDoc);
+          res.send(result);
+        } catch (error) {
+          console.log(error.message);
+        }
       }
-    });
+    );
 
     // Delete user
-    app.delete("/users/:id", async (req, res) => {
+    app.delete("/users/:id", verifyToken, verifyAdmin, async (req, res) => {
       try {
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
@@ -109,10 +160,35 @@ async function run() {
       }
     });
 
+    // Menu related api
+
     // get all menu data from server
     app.get("/menu", async (req, res) => {
       try {
         const result = await menuCollection.find().toArray();
+        res.send(result);
+      } catch (error) {
+        console.log(error.massage);
+      }
+    });
+
+    // save to server menu data
+    app.post("/menu", async (req, res) => {
+      try {
+        const item = req.body;
+        const result = await menuCollection.insertOne(item);
+        res.send(result);
+      } catch (error) {
+        console.log(error.message);
+      }
+    });
+
+    // Delete menu item
+    app.delete("/menu/:id", verifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await menuCollection.deleteOne(query);
         res.send(result);
       } catch (error) {
         console.log(error.massage);
@@ -144,7 +220,7 @@ async function run() {
     });
 
     // save to server
-    app.post("/carts", async (req, res) => {
+    app.post("/carts", verifyToken, verifyAdmin, async (req, res) => {
       try {
         const cartItem = req.body;
         const result = await cartCollection.insertOne(cartItem);
