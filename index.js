@@ -297,6 +297,19 @@ async function run() {
         console.log(error.message);
       }
     });
+    // get payment data from server
+    app.get("/payments/:email", verifyToken, async (req, res) => {
+      try {
+        const query = { email: req.params.email };
+        if (req.params.email !== req.decoded.email) {
+          return res.status(403).send({ massage: "forbidden access" });
+        }
+        const result = await paymentCollection.find(query).toArray();
+        res.send(result);
+      } catch (error) {
+        console.log(error.message);
+      }
+    });
 
     // save payment data
 
@@ -315,7 +328,6 @@ async function run() {
         const deleteResult = await cartCollection.deleteMany(query);
 
         res.send({ paymentResult, deleteResult });
-        
       } catch (error) {
         console.log(error.message);
       }
