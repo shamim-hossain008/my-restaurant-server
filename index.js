@@ -2,8 +2,10 @@ const express = require("express");
 const app = express();
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
+
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const port = process.env.PORT || 5001;
 
 //middleware
@@ -30,6 +32,7 @@ async function run() {
     const menuCollection = client.db("restaurantDB").collection("menu");
     const reviewCollection = client.db("restaurantDB").collection("reviews");
     const cartCollection = client.db("restaurantDB").collection("carts");
+    const paymentCollection = client.db("restaurantDB").collection("payments");
 
     //jwt related api
 
@@ -172,6 +175,41 @@ async function run() {
       }
     });
 
+    // Get menu data by id for update
+    app.get("/menu/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const result = await menuCollection.findOne({ _id: id });
+        console.log(result, "result");
+        res.send(result);
+      } catch (error) {
+        console.log(error.massage);
+      }
+    });
+    // update menu item by id
+    app.patch("/menu/:id", async (req, res) => {
+      try {
+        const item = req.body;
+        const id = req.params.id;
+        const filter = { _id: id };
+        const updatedDoc = {
+          $set: {
+            name: item.name,
+            category: item.category,
+            price: item.price,
+            recipe: item.recipe,
+            image: item.image,
+          },
+        };
+        const result = await menuCollection.updateOne(filter, updatedDoc);
+        res.send(result);
+        console.log(result, " updated result 203 line");
+      } catch (error) {
+        console.log(error.message);
+      }
+    });
+
     // save to server menu data
     app.post("/menu", async (req, res) => {
       try {
@@ -237,6 +275,47 @@ async function run() {
         const query = { _id: new ObjectId(id) };
         const result = await cartCollection.deleteOne(query);
         res.send(result);
+      } catch (error) {
+        console.log(error.message);
+      }
+    });
+    // Payment intent
+    app.post("/create-payment-intent", async (req, res) => {
+      try {
+        const { price } = req.body;
+        const amount = parseInt(price * 100);
+
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: amount,
+          currency: "myr",
+          payment_method_types: ["card"],
+        });
+        res.send({
+          clientSecret: paymentIntent.client_secret,
+        });
+      } catch (error) {
+        console.log(error.message);
+      }
+    });
+
+    // save payment data
+
+    app.post("/payments", async (req, res) => {
+      try {
+        const payment = req.body;
+        const paymentResult = await paymentCollection.insertOne(payment);
+
+        // carefully delete each item from the cart
+        console.log("payment info", payment);
+        const query = {
+          _id: {
+            $in: payment.cartIds.map((id) => new ObjectId(id)),
+          },
+        };
+        const deleteResult = await cartCollection.deleteMany(query);
+
+        res.send({ paymentResult, deleteResult });
+        
       } catch (error) {
         console.log(error.message);
       }
