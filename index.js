@@ -258,7 +258,7 @@ async function run() {
     });
 
     // save to server
-    app.post("/carts", verifyToken, verifyAdmin, async (req, res) => {
+    app.post("/carts", verifyToken, async (req, res) => {
       try {
         const cartItem = req.body;
         const result = await cartCollection.insertOne(cartItem);
@@ -328,6 +328,90 @@ async function run() {
         const deleteResult = await cartCollection.deleteMany(query);
 
         res.send({ paymentResult, deleteResult });
+      } catch (error) {
+        console.log(error.message);
+      }
+    });
+
+    // Stats or analytics
+    app.get("/admin-stats", verifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const users = await userCollection.estimatedDocumentCount();
+        const menuItems = await menuCollection.estimatedDocumentCount();
+        const orders = await paymentCollection.estimatedDocumentCount();
+
+        // this is not the best way
+        // const payments = await paymentCollection.find().toArray();
+        // const revenue = payments.reduce(
+        //   (total, payment) => total + payment.price,
+        //   0
+        // );
+        // this is the  best way
+        const result = await paymentCollection
+          .aggregate([
+            {
+              $group: {
+                _id: null,
+                totalRevenue: {
+                  $sum: "$price",
+                },
+              },
+            },
+          ])
+          .toArray();
+
+        const revenue = result.length > 0 ? result[0].totalRevenue : 0;
+
+        res.send({
+          users,
+          menuItems,
+          orders,
+          revenue,
+        });
+      } catch (error) {
+        console.log(error.message);
+      }
+    });
+
+    //using aggregate pipeline
+    app.get("/order-stats", verifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const result = await paymentCollection
+          .aggregate([
+            {
+              $unwind: "$menuItemIds",
+            },
+            {
+              $lookup: {
+                from: "menu",
+                localField: "menuItemIds",
+                foreignField: "_id",
+                as: "menuItems",
+              },
+            },
+            {
+              $unwind: "$menuItems",
+            },
+            {
+              $group: {
+                _id: "$menuItems.category",
+                quantity: {
+                  $sum: 1,
+                },
+                revenue: { $sum: "$menuItems.price" },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                category: "$_id",
+                quantity: "$quantity",
+                revenue: "$revenue",
+              },
+            },
+          ])
+          .toArray();
+        res.send(result);
       } catch (error) {
         console.log(error.message);
       }
